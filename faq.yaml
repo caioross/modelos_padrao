@@ -1,0 +1,132 @@
+schema_version: "1.1"
+language: "pt-BR"
+updated_at: "2025-08-20"
+context: "Agecom"
+timezone: "America/Sao_Paulo"
+
+contacts:
+  phone_main: "(XX) XXXX-XXXX"
+  whatsapp: "(XX) XXXX-XXXX"
+  emergency: "(XX) XXXX-YYYY"
+
+defaults:
+  tone: "profissional, empático, claro"
+  cta_padrao: "Posso te ajudar a agendar uma avaliação?"
+  routing:
+    agendamento_intent: "agendamento"
+    transferencia_intent: "transferencia_humana"
+
+faqs:
+  - id: "horario_atendimento"
+    status: "active"
+    categoria: "Geral"
+    pergunta: "Qual o horário de atendimento da clínica?"
+    variacoes:
+      - "Qual o horário de funcionamento?"
+      - "Vocês abrem aos sábados?"
+      - "Quando vocês atendem?"
+    resposta: >-
+      Nossos horários de atendimento são de segunda a sexta, das 08:00 às 18:00,
+      e aos sábados das 09:00 às 13:00 (horário de Brasília).
+    resposta_curta: "Seg–Sex 08:00–18:00 • Sáb 09:00–13:00."
+    structured:
+      hours:
+        monday_friday:
+          open: "08:00"
+          close: "18:00"
+        saturday:
+          open: "09:00"
+          close: "13:00"
+        sunday: "fechado"
+      accepts_walk_in: false
+    follow_up_suggestions:
+      - "Quer que eu verifique os próximos horários livres?"
+      - "Posso te ajudar a agendar?"
+    tags: ["horário", "atendimento", "clínica", "funcionamento"]
+    relevancia: 0.98
+
+  - id: "convenio_aceita"
+    status: "active"
+    categoria: "Pagamentos e Convênios"
+    pergunta: "Aceitam convênio odontológico?"
+    variacoes:
+      - "Vocês atendem pelo meu plano odontológico?"
+      - "Trabalham com convênios?"
+      - "Meu plano é aceito?"
+    resposta: >-
+      Sim, atendemos diversos convênios odontológicos. Para confirmar se o seu é
+      aceito, me informe o nome do convênio e, se possível, o número da carteirinha.
+    resposta_curta: "Atendemos vários convênios. Qual é o seu?"
+    expected_entities:
+      - "convenio_nome"
+      - "numero_carteirinha?"
+    cta_sugerida: "Informe o nome do seu convênio para eu conferir."
+    follow_up_suggestions:
+      - "Qual é o nome do seu convênio?"
+      - "Prefere pagar particular e solicitar reembolso?"
+    tags: ["convênio", "pagamento", "plano de saúde", "plano odontológico"]
+    relevancia: 0.93
+
+  - id: "preco_limpeza_dental"
+    status: "active"
+    categoria: "Procedimentos"
+    pergunta: "Quanto custa uma limpeza dental?"
+    variacoes:
+      - "Qual o valor da profilaxia?"
+      - "Preço da limpeza nos dentes?"
+      - "Quanto sai uma limpeza?"
+    resposta: >-
+      O valor pode variar conforme a necessidade clínica e eventuais coberturas
+      de convênio. O primeiro passo é fazer uma avaliação para definirmos o plano
+      de tratamento e o orçamento exato.
+    resposta_curta: "Depende da avaliação. Quer agendar para um orçamento exato?"
+    cta_sugerida: "Posso agendar sua avaliação inicial?"
+    route_on_yes: "agendamento"
+    follow_up_suggestions:
+      - "Prefere avaliação no período da manhã ou da tarde?"
+      - "Você utiliza algum convênio?"
+    tags: ["preço", "limpeza", "custo", "serviço", "profilaxia"]
+    relevancia: 0.90
+
+  - id: "como_agendar"
+    status: "active"
+    categoria: "Agendamento"
+    pergunta: "Como posso agendar uma consulta?"
+    variacoes:
+      - "Quero marcar uma consulta"
+      - "Como faço para agendar?"
+      - "Agendar atendimento"
+    resposta: >-
+      Você pode agendar pelo telefone {contacts.phone_main} ou pelo WhatsApp
+      {contacts.whatsapp}. Se preferir, eu posso iniciar o agendamento por aqui agora.
+    resposta_curta: "Telefone {contacts.phone_main} • WhatsApp {contacts.whatsapp} • Posso agendar por aqui."
+    action:
+      type: "offer_scheduling"
+      calendar_defaults:
+        tipo_compromisso_preferido: "Avaliação Odontológica"
+        duracao_minutos: 45
+    follow_up_suggestions:
+      - "Qual dia e horário você prefere?"
+      - "Qual é o seu nome completo e telefone para confirmação?"
+    tags: ["agendamento", "consulta", "contato", "marcar"]
+    relevancia: 0.96
+
+  - id: "emergencia_fora_horario"
+    status: "active"
+    categoria: "Emergência"
+    pergunta: "Vocês atendem emergências fora do horário comercial?"
+    variacoes:
+      - "Atendem urgência à noite?"
+      - "Tem plantão odontológico?"
+      - "Como faço em caso de dor forte agora?"
+    resposta: >-
+      Para emergências fora do horário comercial, ligue para o nosso número de
+      emergência {contacts.emergency}. O atendimento é sujeito à disponibilidade.
+    resposta_curta: "Emergências: {contacts.emergency} (sujeito à disponibilidade)."
+    requires_handover: true
+    escalation_hint: "Se o usuário relatar dor aguda, trauma ou sangramento, priorizar transferência."
+    follow_up_suggestions:
+      - "Pode descrever rapidamente o que está sentindo?"
+      - "Qual é o melhor telefone para contato imediato?"
+    tags: ["emergência", "urgência", "horário", "plantão"]
+    relevancia: 0.92

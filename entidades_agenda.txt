@@ -1,0 +1,316 @@
+schema_versao: "1.2"
+locale: "pt-BR"
+timezone: "America/Sao_Paulo"
+moeda: "BRL"
+
+formatos:
+  data: "DD/MM/YYYY"
+  hora: "HH:mm"
+  datetime_iso: "YYYY-MM-DDTHH:mm:ssZ"
+
+# Usado nos templates de mensagem (Mustache/Handlebars-style).
+# Mantemos compatibilidade com {{data}} e {{hora}}.
+placeholders_disponiveis:
+  - "{{nome_completo}}"
+  - "{{primeiro_nome}}"
+  - "{{telefone}}"
+  - "{{inicio_data}}"         # ex: 20/08/2025
+  - "{{inicio_hora}}"         # ex: 14:30
+  - "{{data}}"                # alias de {{inicio_data}}
+  - "{{hora}}"                # alias de {{inicio_hora}}
+  - "{{tipo_compromisso}}"
+  - "{{descricao_compromisso}}"
+  - "{{profissional_nome}}"
+  - "{{endereco_clinica}}"
+  - "{{link_mapa}}"
+  - "{{link_reagendar}}"
+  - "{{link_cancelar}}"
+  - "{{procedimento_anterior}}"
+  - "{{sintomas_principais}}"
+
+validadores:
+  nome_completo:
+    regex: "^(?=.{5,100}$)(?:[A-Za-zÀ-ÖØ-öø-ÿ'`^~]+\\s+){1,}[A-Za-zÀ-ÖØ-öø-ÿ'`^~]+$"
+    mensagem_erro: "Informe nome e sobrenome (mínimo 2 palavras)."
+  telefone:
+    # Aceita Brasil com ou sem +55; armazene limpo (somente dígitos) no seu fluxo.
+    regex: "^(?:\\+?55)?\\s?\\(?\\d{2}\\)?\\s?\\d{4,5}-?\\d{4}$"
+    mensagem_erro: "Telefone inválido. Use DDD e 8–9 dígitos (ex: 11 98765-4321)."
+  data:
+    regex: "^(0?[1-9]|[12][0-9]|3[01])/(0?[1-9]|1[012])/\\d{4}$"
+    mensagem_erro: "Data inválida. Use DD/MM/AAAA."
+  hora:
+    regex: "^([01]?\\d|2[0-3]):[0-5]\\d$"
+    mensagem_erro: "Hora inválida. Use HH:mm (24h)."
+  procedimento_anterior:
+    regex: "^.{0,200}$"
+    mensagem_erro: "Máximo 200 caracteres."
+  sintomas_principais:
+    regex: "^.{10,500}$"
+    mensagem_erro: "Descreva sintomas em pelo menos 10 caracteres."
+
+canais_permitidos: ["whatsapp", "sms", "email"]
+
+mensagens_padrao:
+  confirmacao_generica: "Confirmação: {{tipo_compromisso}} em {{inicio_data}} às {{inicio_hora}} com {{profissional_nome}}. Endereço: {{endereco_clinica}}. Chegue 10 min antes."
+  lembrete_1h: "Lembrete: {{tipo_compromisso}} hoje às {{inicio_hora}}. Endereço: {{endereco_clinica}}. Qualquer imprevisto: {{link_reagendar}} ou {{link_cancelar}}."
+  pos_consulta_nps: "Como foi sua experiência hoje? De 0 a 10, qual a chance de indicar nossa clínica? Responda com um número. Obrigado!"
+
+politicas_globais:
+  # Tolerâncias e janelas padrão (podem ser sobrescritas em cada compromisso)
+  tolerancia_atraso_min: 10
+  cancelamento_min_antecedencia_min: 120
+  reagendamento_min_antecedencia_min: 120
+  # Janelas de funcionamento (para roteamento automático de slots)
+  funcionamento:
+    dias_semana: ["mon", "tue", "wed", "thu", "fri"]   # "sat", "sun" se atender
+    horarios:
+      - "08:00-12:00"
+      - "13:30-18:00"
+    almoco:
+      - "12:00-13:30"
+  feriados_fixos: ["01/01","25/12"]  # DD/MM
+  bloqueios_esporadicos: []          # ex: ["05/09/2025"]
+
+# Inventário opcional para alocação de recursos/salas/profissionais
+recursos:
+  salas:
+    - id: "sala_1"
+    - id: "sala_2"
+  equipamentos:
+    - id: "ultrassom"
+    - id: "raio_x"
+profissionais:
+  - id: "OD01"
+    nome: "Equipe Clínica"
+    habilidades: ["avaliacao_odontologica","limpeza_dental","retorno","emergencia_dental"]
+    capacidade_simultanea: 1
+
+# =====================================================
+# COMPROMISSOS (os tipos de agendamento em si)
+# =====================================================
+compromissos:
+
+  - id: "avaliacao_odontologica"
+    tipo_compromisso: "Avaliação Odontológica"
+    descricao: "Primeira consulta para diagnóstico geral e plano de tratamento."
+    prioridade: 2
+    duracao_minutos: 45
+    buffer_antes_minutos: 5
+    buffer_depois_minutos: 10
+    capacidade_simultanea: 1
+    recursos_necessarios:
+      salas: ["sala_1"]
+      equipamentos: []
+    janelas_permitidas:
+      dias_semana: ["mon","tue","wed","thu","fri"]
+      horarios: ["08:00-12:00","13:30-18:00"]
+    antecedencia_minima_min: 120
+    antecedencia_maxima_dias: 60
+    limites:
+      por_dia: 16
+      por_paciente_dia: 1
+    publico_alvo: ["novos","recorrentes"]
+    custo_estimado: null  # pode ser definido após diagnóstico
+    info_requerida:
+      - chave: "nome_completo"
+        label: "Nome completo"
+        required: true
+        validador: "nome_completo"
+      - chave: "telefone"
+        label: "Telefone (com DDD)"
+        required: true
+        validador: "telefone"
+      - chave: "data"
+        label: "Data desejada"
+        required: true
+        validador: "data"
+      - chave: "hora"
+        label: "Hora desejada"
+        required: true
+        validador: "hora"
+    preparo_paciente:
+      - "Chegar com 10 min de antecedência."
+      - "Levar documentos e exames anteriores (se tiver)."
+    confirmacoes:
+      - canal: "whatsapp"
+        template: "Confirmação: Sua avaliação odontológica está agendada para {{inicio_data}} às {{inicio_hora}}. Favor chegar 10 min antes."
+        antecedencia_minutos: 1440
+        anexar_ics: true
+      - canal: "whatsapp"
+        template: "Lembrete: Sua avaliação odontológica será em 1 hora, às {{inicio_hora}}."
+        antecedencia_minutos: 60
+        anexar_ics: false
+    follow_ups:
+      - canal: "whatsapp"
+        template: "{{mensagens_padrao.pos_consulta_nps}}"
+        atraso_minutos_pos_consulta: 120
+    lgpd:
+      consentimento_obrigatorio: true
+
+  - id: "limpeza_dental"
+    tipo_compromisso: "Limpeza Dental"
+    descricao: "Procedimento de profilaxia e remoção de tártaro."
+    prioridade: 3
+    duracao_minutos: 60
+    buffer_antes_minutos: 5
+    buffer_depois_minutos: 10
+    capacidade_simultanea: 1
+    recursos_necessarios:
+      salas: ["sala_1","sala_2"]
+      equipamentos: ["ultrassom"]
+    janelas_permitidas:
+      dias_semana: ["mon","tue","wed","thu","fri","sat"]
+      horarios: ["08:00-12:00","13:30-18:00"]
+    antecedencia_minima_min: 120
+    antecedencia_maxima_dias: 45
+    limites:
+      por_dia: 12
+      por_paciente_dia: 1
+    publico_alvo: ["novos","recorrentes"]
+    custo_estimado: 200.00
+    info_requerida:
+      - chave: "nome_completo"
+        label: "Nome completo"
+        required: true
+        validador: "nome_completo"
+      - chave: "data"
+        label: "Data desejada"
+        required: true
+        validador: "data"
+      - chave: "hora"
+        label: "Hora desejada"
+        required: true
+        validador: "hora"
+    preparo_paciente:
+      - "Evitar alimentos com corantes fortes no dia."
+      - "Higienizar os dentes normalmente antes da consulta."
+    confirmacoes:
+      - canal: "whatsapp"
+        template: "Confirmação: Sua limpeza dental está agendada para {{inicio_data}} às {{inicio_hora}}."
+        antecedencia_minutos: 1440
+        anexar_ics: true
+    follow_ups:
+      - canal: "whatsapp"
+        template: "{{mensagens_padrao.pos_consulta_nps}}"
+        atraso_minutos_pos_consulta: 120
+    lgpd:
+      consentimento_obrigatorio: true
+
+  - id: "retorno"
+    tipo_compromisso: "Retorno"
+    descricao: "Consulta de acompanhamento após tratamento."
+    prioridade: 4
+    duracao_minutos: 30
+    buffer_antes_minutos: 0
+    buffer_depois_minutos: 5
+    capacidade_simultanea: 1
+    recursos_necessarios:
+      salas: ["sala_2"]
+      equipamentos: []
+    janelas_permitidas:
+      dias_semana: ["mon","tue","wed","thu","fri"]
+      horarios: ["09:00-12:00","14:00-17:30"]
+    antecedencia_minima_min: 60
+    antecedencia_maxima_dias: 30
+    limites:
+      por_dia: 14
+      por_paciente_dia: 1
+    publico_alvo: ["recorrentes"]
+    custo_estimado: 0.00
+    info_requerida:
+      - chave: "nome_completo"
+        label: "Nome completo"
+        required: true
+        validador: "nome_completo"
+      - chave: "data"
+        label: "Data desejada"
+        required: true
+        validador: "data"
+      - chave: "hora"
+        label: "Hora desejada"
+        required: true
+        validador: "hora"
+      - chave: "procedimento_anterior"
+        label: "Procedimento anterior"
+        required: true
+        validador: "procedimento_anterior"
+    preparo_paciente:
+      - "Trazer qualquer desconforto observado desde o último atendimento."
+    confirmacoes:
+      - canal: "whatsapp"
+        template: "Confirmação: Seu retorno para acompanhamento está agendado para {{inicio_data}} às {{inicio_hora}}."
+        antecedencia_minutos: 1440
+        anexar_ics: true
+    follow_ups: []
+    lgpd:
+      consentimento_obrigatorio: true
+
+  - id: "emergencia_dental"
+    tipo_compromisso: "Emergência Dental"
+    descricao: "Atendimento imediato para dor ou trauma agudo. Prioridade máxima."
+    prioridade: 1
+    duracao_minutos: 90
+    buffer_antes_minutos: 0
+    buffer_depois_minutos: 0
+    capacidade_simultanea: 1
+    recursos_necessarios:
+      salas: ["sala_1"]
+      equipamentos: ["raio_x"]
+    janelas_permitidas:
+      dias_semana: ["mon","tue","wed","thu","fri","sat"]
+      horarios: ["08:00-18:00"]
+    antecedencia_minima_min: 0
+    antecedencia_maxima_dias: 7
+    limites:
+      por_dia: 6
+      por_paciente_dia: 1
+    publico_alvo: ["novos","recorrentes"]
+    custo_estimado: null
+    info_requerida:
+      - chave: "nome_completo"
+        label: "Nome completo"
+        required: true
+        validador: "nome_completo"
+      - chave: "telefone"
+        label: "Telefone (com DDD)"
+        required: true
+        validador: "telefone"
+      - chave: "sintomas_principais"
+        label: "Descreva rapidamente os sintomas"
+        required: true
+        validador: "sintomas_principais"
+    triagem_automatica:
+      # Palavras-chave para priorização e roteamento (n8n pode ler e acionar um nó de escalonamento)
+      palavras_chave_graves: ["sangramento", "trauma", "dente caiu", "inchaço", "febre", "abscesso", "acidente", "fratura"]
+      acao_se_grave:
+        - "ESCALAR_HUMANO_IMEDIATO"     # ligar ou abrir atendimento humano
+        - "BLOQUEAR_REAGENDAMENTO"      # paciente não pode remarcar sozinho
+      mensagem_triagem_grave: "Detectamos sinais de urgência. Um atendente vai falar com você AGORA. Se a dor for insuportável, procure atendimento hospitalar."
+    confirmacoes: []
+    follow_ups: []
+    regra_especial: "Encaminhar imediatamente para atendente humano ou telefone de emergência."
+    lgpd:
+      consentimento_obrigatorio: true
+
+# =====================================================
+# MAPEAMENTO DE EVENTOS PARA FLOWS (opcional, útil no n8n)
+# =====================================================
+eventos_n8n:
+  on_booking_created: "webhook_agendamento_criado"
+  on_booking_confirmed: "webhook_agendamento_confirmado"
+  on_message_send: "webhook_envio_mensagem"
+  on_reschedule: "webhook_reagendamento"
+  on_cancel: "webhook_cancelamento"
+  on_triage_escalate: "webhook_escalonamento_emergencia"
+
+# =====================================================
+# DEFAULTS PRA RENDER DE TEMPLATES E LINKS
+# =====================================================
+defaults:
+  profissional_nome: "Equipe Clínica"
+  endereco_clinica: "Rua Exemplo, 123 - Centro"
+  link_mapa: "https://maps.example.com/clinica"
+  link_reagendar: "https://minha-clinica.com/reagendar/{{id_agendamento}}"
+  link_cancelar: "https://minha-clinica.com/cancelar/{{id_agendamento}}"
+  anexar_ics_por_padrao: true

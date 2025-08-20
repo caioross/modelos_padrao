@@ -1,0 +1,171 @@
+name: ai-assist-stack
+
+networks:
+  default:
+    name: ai-assist-net
+    driver: bridge
+
+volumes:
+  n8n_data:
+  postgres_data:
+  minio_data:
+  ollama_data:
+  redis_data:
+
+services:
+  ai-assist-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_pass}
+      POSTGRES_USER_N8N: ${POSTGRES_USER_N8N:-appuser}
+      POSTGRES_PASSWORD_N8N: ${POSTGRES_PASSWORD_N8N:-app_pass}
+      POSTGRES_DB_N8N: ${POSTGRES_DB_N8N:-n8n_db}
+      POSTGRES_USER_PGVECTOR: ${POSTGRES_USER_PGVECTOR:-raguser}
+      POSTGRES_PASSWORD_PGVECTOR: ${POSTGRES_PASSWORD_PGVECTOR:-rag_pass}
+      POSTGRES_DB_PGVECTOR: ${POSTGRES_DB_PGVECTOR:-rag_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-postgres-pgvector.sh:/docker-entrypoint-initdb.d/10-init-pgvector.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres -d ${POSTGRES_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks: [default]
+
+  ai-assist-minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+    volumes:
+      - minio_data:/data
+    networks: [default]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  ai-assist-minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      ai-assist-minio:
+        condition: service_started
+    restart: "no"
+    environment:
+      MC_HOST_local: http://${MINIO_ROOT_USER:-minioadmin}:${MINIO_ROOT_PASSWORD:-minioadmin123}@ai-assist-minio:9000
+      MINIO_BUCKET_DOCS: ${MINIO_BUCKET_DOCS:-docs}
+    entrypoint: [ "sh", "-lc" ]
+    command:
+      - >
+        set -e;
+        until (mc ls local >/dev/null 2>&1); do
+          echo "Aguardando MinIO..."; sleep 2;
+        done;
+        mc mb -p local/${MINIO_BUCKET_DOCS} || true;
+        echo "Bucket '${MINIO_BUCKET_DOCS}' OK.";
+    networks: [default]
+
+  llm-ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [default]
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "sh", "-lc", "wget -qO- http://localhost:11434/api/tags >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+
+  llm-ollama-pull:
+    image: ollama/ollama:latest
+    restart: "no"
+    depends_on:
+      llm-ollama:
+        condition: service_started
+    entrypoint: [ "sh", "-lc" ]
+    command:
+      - >
+        set -e;
+        until (wget -qO- http://llm-ollama:11434/api/tags >/dev/null 2>&1); do
+          echo "Aguardando Ollama..."; sleep 2;
+        done;
+        echo "Baixando modelo ${OLLAMA_MODEL:-llama3.1:8b}...";
+        OLLAMA_HOST=http://llm-ollama:11434 ollama pull ${OLLAMA_MODEL:-llama3.1:8b};
+        echo "Modelo pronto."
+    networks: [default]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "notice"]
+    volumes:
+      - redis_data:/data
+    networks: [default]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  ai-assist-n8n:
+    image: n8nio/n8n:1.64.0
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-America/Sao_Paulo}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_PORT: ${N8N_PORT:-5678}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678/}
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-changeme-32chars-min}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-admin123}
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: ai-assist-postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB_N8N:-n8n_db}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER_N8N:-appuser}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD_N8N:-app_pass}
+      OLLAMA_URL: http://llm-ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+      # separar worker/webhook depois
+      # QUEUE_BULL_REDIS_HOST: redis
+      # QUEUE_BULL_REDIS_PORT: 6379
+      # N8N_EXECUTIONS_MODE: queue
+    volumes:
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    depends_on:
+      ai-assist-postgres:
+        condition: service_healthy
+      ai-assist-minio:
+        condition: service_started
+      ai-assist-minio-setup:
+        condition: service_completed_successfully
+      llm-ollama:
+        condition: service_healthy
+      llm-ollama-pull:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL","node -e \"fetch('http://localhost:5678/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+    networks: [default]

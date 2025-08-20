@@ -1,0 +1,188 @@
+# ============================================================
+# ESCALATION POLICY & TEMPLATES (AI-Assist) — v2.1
+# ============================================================
+# Objetivo:
+# Garantir transferências rápidas, seguras e auditáveis para atendimento humano,
+# reduzindo retrabalho e frustração do usuário, e integrando com e-mail/CRM/Help Desk.
+
+# ------------------------------------------------------------
+# 1) CONDIÇÕES PARA ESCALONAMENTO (gatilhos)
+# ------------------------------------------------------------
+# Prioridade: se mais de uma condição for verdadeira, preferir a de maior prioridade (ordem abaixo).
+
+# [P1] Pedido explícito do usuário (NÃO pedir confirmação; escalar imediatamente)
+#   - Palavras/expressões chave (case-insensitive, variações e sinônimos):
+#     "falar com humano", "atendente", "suporte", "reclamação", "ouvidoria",
+#     "suporte humano", "analista", "pessoa de verdade", "humano agora",
+#     "quero falar com alguém", "quero um atendente".
+#
+# [P2] Segurança/Crítico (escalar imediatamente)
+#   - Ameaça, assédio, emergência, indícios de fraude, dados sensíveis compartilhados,
+#     suspeita de violação contratual/jurídica, crise operacional.
+#
+# [P3] Baixa confiança do classificador de intenção
+#   - Se confidence < 0.70 => escalar (ou coletar 1 confirmação curta antes de escalar, ver 3.1).
+#
+# [P4] Ambiguidade/Frustração
+#   - Após 2 tentativas de esclarecimento sem sucesso OU
+#     se detectar frustração/raiva (ex.: “isso não ajuda”, “cansei”, “ridículo”).
+#
+# [P5] Assuntos complexos
+#   - Negociação de contrato, temas legais/financeiros, problemas técnicos avançados,
+#     exceções de política, solicitações fora do escopo do bot.
+
+# ------------------------------------------------------------
+# 2) CHECKLIST ANTES DE TRANSFERIR
+# ------------------------------------------------------------
+# (pular checklist em [P1] e [P2], exceto mascarar PII)
+# - Capturar/confirmar (se disponíveis):
+#   - conversation_id, canal (WhatsApp/Web/Telefone), user_name, user_phone (mascarado),
+#   - última_mensagem_usuario, intenção_detectada, confidence,
+#   - tentativas_de_esclarecimento (contador), sentimento (opcional),
+#   - horário_atual e status_horário (dentro/fora do expediente),
+#   - anexos relevantes (ids/urls) e tags (motivo_escalonamento).
+# - Sanitizar PII (ocultar dígitos de cartão/senha; truncar CPF/telefone).
+# - Definir motivo_escalonamento (enum): explicit_request | low_confidence | ambiguity |
+#   frustration | complex_topic | safety | other.
+
+# ------------------------------------------------------------
+# 3) MENSAGENS AO USUÁRIO (templates)
+# ------------------------------------------------------------
+
+# 3.1 Confirmação curta (usar APENAS nos casos P3/P4/P5 — nunca em P1/P2)
+# - Objetivo: evitar transferência acidental quando ainda é possível resolver via IA.
+MSG_CONFIRMAR_TRANSFERENCIA="{{saudacao}} Posso te conectar com um atendente humano agora. \
+Se preferir, também posso tentar resolver por aqui rapidinho. \
+Você prefere falar com um atendente humano? (Sim/Não)"
+
+# 3.2 Transferência aprovada (padrão)
+# - Preencha {{espera_media}} apenas se houver fonte confiável; caso contrário, omita a frase do tempo.
+MSG_TRANSFERENCIA_APROVADA="Combinado! Vou te conectar com um de nossos atendentes. \
+Por favor, aguarde um momento enquanto encaminho sua solicitação.{{frase_espera}}"
+
+# 3.2.1 Fragmento opcional de espera (concatenado em {{frase_espera}})
+FRAGMENTO_ESPERA=" O tempo de espera médio é de {{espera_media}}."
+
+# 3.3 Fora do horário de atendimento (se aplicável)
+MSG_FORA_DE_HORARIO="Entendi! Estamos fora do horário de atendimento agora \
+({{janela_atendimento}}). Já abri um chamado para você: {{ticket_id}}. \
+Um atendente assume assim que estivermos online."
+
+# 3.4 Falha de roteamento/indisponibilidade do time
+MSG_FALHA_ROTEAMENTO="Sinalizei sua solicitação para o time humano, mas ocorreu uma \
+indisponibilidade momentânea. Já abri o protocolo {{ticket_id}} e priorizei seu caso. \
+Você pode acompanhar por aqui; aviso assim que um atendente assumir."
+
+# 3.5 Cancelamento da transferência pelo usuário
+MSG_CANCELAR_TRANSFERENCIA="Sem problema! Não vou transferir agora. \
+Se mudar de ideia, é só dizer \"quero falar com um atendente\"."
+
+# Observações:
+# - {{saudacao}}: “Olá”, “Oi {{user_name}}” etc.
+# - {{frase_espera}}: vazio OU FRAGMENTO_ESPERA (somente se houver {{espera_media}}).
+# - Evite prometer prazos rígidos; use estimativas apenas quando confiáveis.
+
+# ------------------------------------------------------------
+# 4) AÇÕES INTERNAS (notificações & CRM)
+# ------------------------------------------------------------
+
+# 4.1 E-mail (obrigatório)
+#   Para: {{ESCALATION_EMAIL_TO}} (ex.: atendimento@suaempresa.com.br)
+#   Assunto: "Solicitação de Atendimento Humano — {{conversation_id}}"
+#   Corpo (texto):
+EMAIL_TEMPLATE_TXT="
+Solicitação de Atendimento Humano
+
+• Conversation ID: {{conversation_id}}
+• Canal: {{canal}}
+• Usuário: {{user_name}} ({{user_phone_mascarado}})
+• Última mensagem do usuário: {{ultima_mensagem_usuario}}
+• Intenção detectada: {{intencao}} (confiança: {{confidence}})
+• Motivo do escalonamento: {{motivo_escalonamento}}
+• Tentativas de esclarecimento: {{tentativas}}
+• Anexos (se houver): {{anexos}}
+• Data/Hora: {{datahora}}
+
+Observações:
+{{observacoes}}
+"
+
+# 4.2 CRM/Help Desk (opcional, recomendado)
+#   Sistema: Zendesk/Freshdesk/HubSpot/ServiceNow (ajuste campos conforme API)
+CRM_PAYLOAD_EXEMPLO_JSON='{
+  "external_id": "{{conversation_id}}",
+  "requester": {"name": "{{user_name}}", "phone": "{{user_phone}}"},
+  "subject": "Escalonamento via IA — {{motivo_escalonamento}}",
+  "description": "Última mensagem: {{ultima_mensagem_usuario}}",
+  "tags": ["escalonamento", "{{canal}}", "{{motivo_escalonamento}}"],
+  "custom_fields": {
+    "intent": "{{intencao}}",
+    "confidence": "{{confidence}}",
+    "attempts": "{{tentativas}}"
+  },
+  "priority": "high",
+  "status": "open"
+}'
+
+# 4.3 Mensageria interna (opcional)
+#   Slack/Teams/Discord: postar alerta no canal do suporte com resumo + link do ticket.
+
+# ------------------------------------------------------------
+# 5) FLUXO NO N8N (pseudológica)
+# ------------------------------------------------------------
+# 1) Detectar gatilho de escalonamento:
+#    - Se P1/P2 => pular confirmação e ir direto para "Transferência aprovada".
+#    - Se P3/P4/P5 => enviar MSG_CONFIRMAR_TRANSFERENCIA e aguardar resposta curta (Sim/Não).
+# 2) Se confirmado (ou P1/P2):
+#    - Enviar ao usuário: MSG_TRANSFERENCIA_APROVADA (+FRAGMENTO_ESPERA se {{espera_media}} existir).
+#    - Disparar e-mail (SMTP/Gmail Node) com EMAIL_TEMPLATE_TXT.
+#    - (Opcional) Criar ticket no CRM (HTTP Request node).
+#    - Atualizar estado da conversa: status="pending-human", owner="queue:support".
+#    - Finalizar fluxo OU entrar em loop de espera (webhook/long-poll) até human take-over.
+# 3) Se fora do horário: usar MSG_FORA_DE_HORARIO e abrir ticket automaticamente.
+# 4) Se falha de roteamento: usar MSG_FALHA_ROTEAMENTO + retry exponencial (3 tentativas).
+# 5) Se o usuário cancelar: MSG_CANCELAR_TRANSFERENCIA e resetar status/owner.
+
+# ------------------------------------------------------------
+# 6) VARIÁVEIS DE TEMPLATE (preencha dinamicamente)
+# ------------------------------------------------------------
+# Obrigatórias quando disponíveis:
+#   {{conversation_id}}, {{canal}}, {{user_name}}, {{user_phone}}/{{user_phone_mascarado}},
+#   {{ultima_mensagem_usuario}}, {{intencao}}, {{confidence}}, {{tentativas}},
+#   {{motivo_escalonamento}}, {{datahora}}
+# Opcionais:
+#   {{espera_media}}, {{frase_espera}}, {{janela_atendimento}}, {{ticket_id}},
+#   {{anexos}}, {{observacoes}}
+
+# ------------------------------------------------------------
+# 7) REGRAS DE PRIVACIDADE & SEGURANÇA
+# ------------------------------------------------------------
+# - Nunca armazenar no e-mail/ticket dados completos de cartão, senhas ou tokens.
+# - Mascare números pessoais (telefone/CPF) quando exibidos externamente.
+# - Remover/ocultar arquivos potencialmente sensíveis de anexos antes do envio.
+# - Auditar todos os eventos de escalonamento com: timestamp, motivo, agente (bot), canal.
+
+# ------------------------------------------------------------
+# 8) CÓDIGOS DE MOTIVO (para métricas)
+# ------------------------------------------------------------
+# explicit_request | low_confidence | ambiguity | frustration | complex_topic | safety | other
+
+# ------------------------------------------------------------
+# 9) EXEMPLOS RÁPIDOS
+# ------------------------------------------------------------
+
+# 9.1 Pedido explícito (P1)
+# Usuário: "Quero falar com um atendente"
+# Ação: MSG_TRANSFERENCIA_APROVADA (+e-mail/CRM) — sem confirmação.
+
+# 9.2 Baixa confiança (P3)
+# Detecção: confidence=0.63
+# Ação: MSG_CONFIRMAR_TRANSFERENCIA -> se "Sim": MSG_TRANSFERENCIA_APROVADA; se "Não": continuar IA.
+
+# 9.3 Fora do horário
+# Ação: MSG_FORA_DE_HORARIO + criar ticket; enviar cópia por e-mail.
+
+# 9.4 Falha no CRM
+# Ação: Retry (3x, backoff 5s/15s/45s). Se persistir, MSG_FALHA_ROTEAMENTO e logar erro.
+
+# ============================================================
